@@ -27,8 +27,6 @@ from cosmos1.models.diffusion.module.blocks import FourierFeatures
 from cosmos1.models.diffusion.module.pretrained_vae import BaseVAE
 from cosmos1.utils import log, misc
 from cosmos1.utils.lazy_config import instantiate as lazy_instantiate
-
-
 class EDMSDE:
     def __init__(
         self,
@@ -38,6 +36,44 @@ class EDMSDE:
         self.sigma_max = sigma_max
         self.sigma_min = sigma_min
 
+
+# def remote_thread(noise_x, sigma, condition: CosmosCondition, tensor_kwargs) -> torch.Tensor:
+    
+#     print(f"noise_x: {noise_x.shape}")
+#     print(f"sigma: {sigma.shape}")
+#     for key, value in condition.to_dict().items():
+#         print(f"{key}: {value.shape}")
+
+#     # Serialize using Serpent
+#     noise_x_bytes = serpent.dumps(noise_x.float().cpu().numpy())
+#     sigma_bytes = serpent.dumps(sigma.float().cpu().numpy())
+    
+#     crossattn_emb_bytes = serpent.dumps(condition.crossattn_emb.float().cpu().numpy())
+#     crossattn_mask_bytes = serpent.dumps(condition.crossattn_mask.float().cpu().numpy())
+    
+#     # Check if padding_mask is present in the condition
+#     padding_mask_bytes = None
+#     if hasattr(condition, 'padding_mask') and condition.padding_mask is not None:
+#         padding_mask_bytes = serpent.dumps(condition.padding_mask.float().cpu().numpy())
+        
+#     scalar_feature_bytes = None
+#     if hasattr(condition, 'scalar_feature') and condition.scalar_feature is not None:
+#         scalar_feature_bytes = serpent.dumps(condition.scalar_feature.float().cpu().numpy())
+
+#     with Pyro5.api.Proxy("PYRO:remote_denoiser@0.0.0.0:9090") as proxy:
+#         # Remote denoise call with None checks
+#         x0_bytes = proxy.remote_denoise(
+#             noise_x_bytes,
+#             sigma_bytes,
+#             crossattn_emb_bytes,
+#             crossattn_mask_bytes,
+#             padding_mask_bytes if padding_mask_bytes else None,
+#             scalar_feature_bytes if scalar_feature_bytes else None
+#         )
+
+#     # Deserialize using Serpent
+#     x0_data = torch.tensor(serpent.loads(x0_bytes), device=tensor_kwargs["device"], dtype=tensor_kwargs["dtype"])
+#     return x0_data
 
 class DiffusionT2WModel(torch.nn.Module):
     """Text-to-world diffusion model that generates video frames from text descriptions.
@@ -150,6 +186,7 @@ class DiffusionT2WModel(torch.nn.Module):
         """Configure input data keys for video and image data."""
         self.input_data_key = self.config.input_data_key  # by default it is video key for Video diffusion model
 
+
     def get_x0_fn_from_batch(
         self,
         data_batch: Dict,
@@ -174,11 +211,37 @@ class DiffusionT2WModel(torch.nn.Module):
         if is_negative_prompt:
             condition, uncondition = self.conditioner.get_condition_with_negative_prompt(data_batch)
         else:
-            condition, uncondition = self.conditioner.get_condition_uncondition(data_batch)
+            condition, uncondition = self.conditioner.get_condition_uncondition(data_batch)        
 
         def x0_fn(noise_x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+            # with ThreadPoolExecutor(max_workers=2) as executor:
+            #     # Submit tasks to the executor
+            #     cond_x0_future = executor.submit(remote_thread, noise_x.cpu(), sigma.cpu(), condition, self.tensor_kwargs)
+            #     uncond_x0_future = executor.submit(remote_thread, noise_x.cpu(), sigma.cpu(), uncondition, self.tensor_kwargs)
+
+            #     # Retrieve the actual results
+            #     cond_x0 = cond_x0_future.result()
+            #     uncond_x0 = uncond_x0_future.result()
+
+            # raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)
+            # if "guided_image" in data_batch:
+            #     # replacement trick that enables inpainting with base model
+            #     assert "guided_mask" in data_batch, "guided_mask should be in data_batch if guided_image is present"
+            #     guide_image = data_batch["guided_image"]
+            #     guide_mask = data_batch["guided_mask"]
+            #     raw_x0 = guide_mask * guide_image + (1 - guide_mask) * raw_x0
+
+            # return raw_x0
+
+            print(f"noise_x: {noise_x.shape}")
+            print(f"sigma: {sigma.shape}")
+            print(f"condition: {condition}")
+            for key, value in condition.to_dict().items():
+                if isinstance(value, torch.Tensor):
+                    print(f"{key}: {value.shape}")
+
             cond_x0 = self.denoise(noise_x, sigma, condition).x0
-            uncond_x0 = self.denoise(noise_x, sigma, uncondition).x0
+            uncond_x0 = self.denoise(noise_x, sigma, uncondition).x0            
             raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)
             if "guided_image" in data_batch:
                 # replacement trick that enables inpainting with base model

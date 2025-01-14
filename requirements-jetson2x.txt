@@ -1,0 +1,8 @@
+einops 
+attrs 
+pynvml
+transformer_engine[pytorch]
+opencv-python
+protobuf
+Pyro5
+msgpack-numpy

@@ -406,3 +406,21 @@ When enabled (default), the upsampler will:
 3. Use the generated description for video generation
 
 Please note that the Video2World prompt upsampler does not consider any user-provided text prompt. To disable this feature, use the `--disable_prompt_upsampler` flag.
+
+
+# Running Text2World on two Jetson Orin AGX
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip3 install -r requirements.txt
+PYTHONPATH=$(pwd) python cosmos1/scripts/download_diffusion.py --model_sizes 7B --model_types Text2World
+# sudo apt install nvidia-cudnn #optional
+pip3 install -r ./requirements-jetson2x.txt
+```
+
+```bash
+PYTHONPATH=$(pwd) python3 cosmos1/models/diffusion/inference/remote_helper.py
+
+PYTHONPATH=$(pwd) python cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints --diffusion_transformer_dir Cosmos-1.0-Diffusion-7B-Text2World --prompt "$PROMPT" --offload_prompt_upsampler --offload_guardrail_models --offload_text_encoder_model  --video_save_name Cosmos-1.0-Diffusion-7B-Text2World --num_video_frames 121 --disable_prompt_upsampler
+```
