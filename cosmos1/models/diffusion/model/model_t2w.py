@@ -12,9 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from typing import Callable, Dict, Optional, Tuple
-
 import torch
 from torch import Tensor
 
@@ -27,6 +24,18 @@ from cosmos1.models.diffusion.module.blocks import FourierFeatures
 from cosmos1.models.diffusion.module.pretrained_vae import BaseVAE
 from cosmos1.utils import log, misc
 from cosmos1.utils.lazy_config import instantiate as lazy_instantiate
+
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Dict, Optional, Tuple
+import msgpack
+import msgpack_numpy as m
+import time
+import threading
+import Pyro5.api
+Pyro5.config.SERIALIZER = "msgpack"
+# Ensure msgpack_numpy is patched
+m.patch()
+
 class EDMSDE:
     def __init__(
         self,
@@ -35,46 +44,7 @@ class EDMSDE:
     ):
         self.sigma_max = sigma_max
         self.sigma_min = sigma_min
-
-
-# def remote_thread(noise_x, sigma, condition: CosmosCondition, tensor_kwargs) -> torch.Tensor:
     
-#     print(f"noise_x: {noise_x.shape}")
-#     print(f"sigma: {sigma.shape}")
-#     for key, value in condition.to_dict().items():
-#         print(f"{key}: {value.shape}")
-
-#     # Serialize using Serpent
-#     noise_x_bytes = serpent.dumps(noise_x.float().cpu().numpy())
-#     sigma_bytes = serpent.dumps(sigma.float().cpu().numpy())
-    
-#     crossattn_emb_bytes = serpent.dumps(condition.crossattn_emb.float().cpu().numpy())
-#     crossattn_mask_bytes = serpent.dumps(condition.crossattn_mask.float().cpu().numpy())
-    
-#     # Check if padding_mask is present in the condition
-#     padding_mask_bytes = None
-#     if hasattr(condition, 'padding_mask') and condition.padding_mask is not None:
-#         padding_mask_bytes = serpent.dumps(condition.padding_mask.float().cpu().numpy())
-        
-#     scalar_feature_bytes = None
-#     if hasattr(condition, 'scalar_feature') and condition.scalar_feature is not None:
-#         scalar_feature_bytes = serpent.dumps(condition.scalar_feature.float().cpu().numpy())
-
-#     with Pyro5.api.Proxy("PYRO:remote_denoiser@0.0.0.0:9090") as proxy:
-#         # Remote denoise call with None checks
-#         x0_bytes = proxy.remote_denoise(
-#             noise_x_bytes,
-#             sigma_bytes,
-#             crossattn_emb_bytes,
-#             crossattn_mask_bytes,
-#             padding_mask_bytes if padding_mask_bytes else None,
-#             scalar_feature_bytes if scalar_feature_bytes else None
-#         )
-
-#     # Deserialize using Serpent
-#     x0_data = torch.tensor(serpent.loads(x0_bytes), device=tensor_kwargs["device"], dtype=tensor_kwargs["dtype"])
-#     return x0_data
-
 class DiffusionT2WModel(torch.nn.Module):
     """Text-to-world diffusion model that generates video frames from text descriptions.
 
@@ -112,6 +82,7 @@ class DiffusionT2WModel(torch.nn.Module):
         self.scaling = EDMScaling(self.sigma_data)
         self.tokenizer = None
         self.model = None
+        self.lock = threading.Lock()
 
     @property
     def net(self):
@@ -192,6 +163,7 @@ class DiffusionT2WModel(torch.nn.Module):
         data_batch: Dict,
         guidance: float = 1.5,
         is_negative_prompt: bool = False,
+        remote_denoiser_uri: Optional[str] = None,
     ) -> Callable:
         """
         Generates a callable function `x0_fn` based on the provided data batch and guidance factor.
@@ -213,36 +185,63 @@ class DiffusionT2WModel(torch.nn.Module):
         else:
             condition, uncondition = self.conditioner.get_condition_uncondition(data_batch)        
 
+        def log_time(future, start_time, description):
+            torch.cuda.synchronize()  # Ensure all CUDA operations are complete
+            end_time = time.time()
+            log.info(f"{description} execution time: {end_time - start_time:.2f} seconds")
+            return future.result()
+
+        @torch.no_grad()
+        def local_thread(noise_x, sigma, condition) -> torch.Tensor:
+            with self.lock:                
+                result = self.denoise(noise_x, sigma, condition).x0
+                return result
+
+        @torch.no_grad()
+        def remote_thread(noise_x, sigma, condition) -> torch.Tensor:    
+            # this is a synchronous call
+            with Pyro5.api.Proxy(remote_denoiser_uri) as proxy:    
+                # Remote denoise call with None checks
+                condition_dict = condition.to_dict()
+                # Remove 'data_type' and any None values from the condition_dict
+                condition_dict = {k: v for k, v in condition_dict.items() if k != 'data_type' and v is not None}
+                # serialize all the tensors from the condition_dict
+                for key, value in condition_dict.items():
+                    if isinstance(value, torch.Tensor):
+                        condition_dict[key] = value.float().cpu().numpy()
+                x0_bytes = proxy.remote_denoise(
+                    m.packb(noise_x.float().cpu().numpy()),
+                    m.packb(sigma.float().cpu().numpy()),
+                    condition.__class__.__name__,
+                    m.packb(condition_dict),            
+                )
+                x0 = torch.tensor(m.unpackb(x0_bytes)).to(**self.tensor_kwargs)
+                return x0
+
         def x0_fn(noise_x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-            # with ThreadPoolExecutor(max_workers=2) as executor:
-            #     # Submit tasks to the executor
-            #     cond_x0_future = executor.submit(remote_thread, noise_x.cpu(), sigma.cpu(), condition, self.tensor_kwargs)
-            #     uncond_x0_future = executor.submit(remote_thread, noise_x.cpu(), sigma.cpu(), uncondition, self.tensor_kwargs)
+            log.info(f"Running for noise level: {sigma.item()}")
+            torch.cuda.synchronize()  # Ensure all CUDA operations are complete
+            start_time = time.time()  # Start timing
 
-            #     # Retrieve the actual results
-            #     cond_x0 = cond_x0_future.result()
-            #     uncond_x0 = uncond_x0_future.result()
+            if remote_denoiser_uri is not None:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    torch.cuda.synchronize()  # Ensure all CUDA operations are complete
+                    start_time_cond = time.time()
+                    cond_x0_future = executor.submit(local_thread, noise_x, sigma, condition)
+                    cond_x0_future.add_done_callback(lambda fut: log_time(fut, start_time_cond, "Conditioned"))
 
-            # raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)
-            # if "guided_image" in data_batch:
-            #     # replacement trick that enables inpainting with base model
-            #     assert "guided_mask" in data_batch, "guided_mask should be in data_batch if guided_image is present"
-            #     guide_image = data_batch["guided_image"]
-            #     guide_mask = data_batch["guided_mask"]
-            #     raw_x0 = guide_mask * guide_image + (1 - guide_mask) * raw_x0
+                    torch.cuda.synchronize()  # Ensure all CUDA operations are complete
+                    start_time_uncond = time.time()
+                    uncond_x0_future = executor.submit(remote_thread, noise_x, sigma, uncondition)                    
+                    uncond_x0_future.add_done_callback(lambda fut: log_time(fut, start_time_uncond, "Unconditioned"))
 
-            # return raw_x0
+                    cond_x0 = cond_x0_future.result()
+                    uncond_x0 = uncond_x0_future.result()
+            else:
+                cond_x0 = self.denoise(noise_x, sigma, condition).x0
+                uncond_x0 = self.denoise(noise_x, sigma, uncondition).x0            
 
-            print(f"noise_x: {noise_x.shape}")
-            print(f"sigma: {sigma.shape}")
-            print(f"condition: {condition}")
-            for key, value in condition.to_dict().items():
-                if isinstance(value, torch.Tensor):
-                    print(f"{key}: {value.shape}")
-
-            cond_x0 = self.denoise(noise_x, sigma, condition).x0
-            uncond_x0 = self.denoise(noise_x, sigma, uncondition).x0            
-            raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)
+            raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)            
             if "guided_image" in data_batch:
                 # replacement trick that enables inpainting with base model
                 assert "guided_mask" in data_batch, "guided_mask should be in data_batch if guided_image is present"
@@ -250,6 +249,9 @@ class DiffusionT2WModel(torch.nn.Module):
                 guide_mask = data_batch["guided_mask"]
                 raw_x0 = guide_mask * guide_image + (1 - guide_mask) * raw_x0
 
+            torch.cuda.synchronize()  # Ensure all CUDA operations are complete
+            end_time = time.time()  # End timing
+            log.info(f"Denoising operation total time: {end_time - start_time:.2f} seconds.")
             return raw_x0
 
         return x0_fn
@@ -300,6 +302,7 @@ class DiffusionT2WModel(torch.nn.Module):
         solver_option: COMMON_SOLVER_OPTIONS = "2ab",
         x_sigma_max: Optional[torch.Tensor] = None,
         sigma_max: float | None = None,
+        remote_denoiser_uri: Optional[str] = None,
     ) -> Tensor:
         """Generate samples from a data batch using diffusion sampling.
 
@@ -321,7 +324,7 @@ class DiffusionT2WModel(torch.nn.Module):
         Returns:
             Tensor: Generated samples after diffusion sampling
         """
-        x0_fn = self.get_x0_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt)
+        x0_fn = self.get_x0_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt, remote_denoiser_uri=remote_denoiser_uri)
         if sigma_max is None:
             sigma_max = self.sde.sigma_max
         else:

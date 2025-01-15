@@ -397,6 +397,7 @@ def generate_world_from_text(
     guidance: float,
     num_steps: int,
     seed: int,
+    remote_denoiser_uri: Optional[str] = None,
 ):
     """Generate video from text prompt using diffusion model.
 
@@ -436,6 +437,7 @@ def generate_world_from_text(
         is_negative_prompt=is_negative_prompt,
         seed=seed,
         x_sigma_max=x_sigma_max,
+        remote_denoiser_uri=remote_denoiser_uri,
     )
 
     return sample

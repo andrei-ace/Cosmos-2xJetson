@@ -56,6 +56,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Skip prompt upsampler for better robustness if the number of words in the prompt is greater than this value",
     )
 
+    parser.add_argument(
+        "--remote_denoiser_uri",
+        type=str,
+        default=None,
+        help="The URI of the remote denoiser to use for text2world generation",
+    )
+
     return parser.parse_args()
 
 
@@ -98,7 +105,7 @@ def demo(cfg):
         offload_tokenizer=cfg.offload_tokenizer,
         offload_text_encoder_model=cfg.offload_text_encoder_model,
         offload_prompt_upsampler=cfg.offload_prompt_upsampler,
-        offload_guardrail_models=cfg.offload_guardrail_models,
+        offload_guardrail_models=cfg.offload_guardrail_models,        
         guidance=cfg.guidance,
         num_steps=cfg.num_steps,
         height=cfg.height,
@@ -106,6 +113,7 @@ def demo(cfg):
         fps=cfg.fps,
         num_video_frames=cfg.num_video_frames,
         seed=cfg.seed,
+        remote_denoiser_uri=cfg.remote_denoiser_uri
     )
 
     # Handle multiple prompts if prompt file is provided

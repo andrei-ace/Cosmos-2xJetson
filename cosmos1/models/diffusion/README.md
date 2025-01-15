@@ -422,5 +422,23 @@ pip3 install -r ./requirements-jetson2x.txt
 ```bash
 PYTHONPATH=$(pwd) python3 cosmos1/models/diffusion/inference/remote_helper.py
 
-PYTHONPATH=$(pwd) python cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints --diffusion_transformer_dir Cosmos-1.0-Diffusion-7B-Text2World --prompt "$PROMPT" --offload_prompt_upsampler --offload_guardrail_models --offload_text_encoder_model  --video_save_name Cosmos-1.0-Diffusion-7B-Text2World --num_video_frames 121 --disable_prompt_upsampler
+PYTHONPATH=$(pwd) python cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints \
+  --diffusion_transformer_dir Cosmos-1.0-Diffusion-7B-Text2World --prompt "$PROMPT" \
+  --video_save_name Cosmos-1.0-Diffusion-7B-Text2World \
+  --disable_prompt_upsampler \
+  --offload_guardrail_models \
+  --offload_prompt_upsampler \
+  --offload_text_encoder_model
+```
+
+```bash
+PYTHONPATH=$(pwd) python cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints \
+  --diffusion_transformer_dir Cosmos-1.0-Diffusion-7B-Text2World --prompt "$PROMPT" \
+  --video_save_name Cosmos-1.0-Diffusion-7B-Text2World_remote \
+  --disable_prompt_upsampler \
+  --offload_guardrail_models \
+  --offload_prompt_upsampler \
+  --offload_text_encoder_model \
+  --offload_tokenizer \
+  --remote_denoiser_uri "PYRO:remote_denoiser@0.0.0.0:9090"
 ```

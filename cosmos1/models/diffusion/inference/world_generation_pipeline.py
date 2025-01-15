@@ -61,8 +61,8 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         checkpoint_name: str,
         prompt_upsampler_dir: Optional[str] = None,
         enable_prompt_upsampler: bool = True,
-        enable_text_guardrail: bool = True,
-        enable_video_guardrail: bool = True,
+        enable_text_guardrail: bool = False,
+        enable_video_guardrail: bool = False,
         offload_network: bool = False,
         offload_tokenizer: bool = False,
         offload_text_encoder_model: bool = False,
@@ -75,6 +75,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         fps: int = 24,
         num_video_frames: int = 121,
         seed: int = 0,
+        remote_denoiser_uri: Optional[str] = None,
     ):
         """Initialize the diffusion world generation pipeline.
 
@@ -98,6 +99,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             fps: Frames per second of output video
             num_video_frames: Number of frames to generate
             seed: Random seed for sampling
+            remote_denoiser_uri: The URI of the remote denoiser to use for text2world generation
         """
         assert inference_type in [
             "text2world",
@@ -112,6 +114,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         self.fps = fps
         self.num_video_frames = num_video_frames
         self.seed = seed
+        self.remote_denoiser_uri = remote_denoiser_uri
 
         super().__init__(
             inference_type=inference_type,
@@ -249,6 +252,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             guidance=self.guidance,
             num_steps=self.num_steps,
             seed=self.seed,
+            remote_denoiser_uri=self.remote_denoiser_uri,
         )
 
         return sample
