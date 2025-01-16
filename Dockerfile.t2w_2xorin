@@ -1,0 +1,23 @@
+FROM dustynv/l4t-pytorch:r36.4.0
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy source code
+COPY cosmos1 /workspace/cosmos1
+
+# Copy main README
+COPY README.md /workspace/
+
+# Copy third-party licenses
+COPY ATTRIBUTIONS.md /workspace/
+COPY requirements.txt requirements.txt
+COPY requirements-t2w_2xorin.txt requirements-t2w_2xorin.txt
+
+RUN pip3 install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip3 install --no-cache-dir -r requirements-t2w_2xorin.txt
+
+EXPOSE 9090
+
+CMD ["/bin/bash"]
