@@ -68,12 +68,12 @@ def main(args):
 
     # Additional models that are always downloaded
     extra_models = [
-        "Cosmos-1.0-Guardrail",
+        # "Cosmos-1.0-Guardrail",
         "Cosmos-1.0-Tokenizer-CV8x8x8",
     ]
 
-    if "Text2World" in args.model_types:
-        extra_models.append("Cosmos-1.0-Prompt-Upsampler-12B-Text2World")
+    #if "Text2World" in args.model_types:
+    #    extra_models.append("Cosmos-1.0-Prompt-Upsampler-12B-Text2World")
 
     # Create local checkpoints folder
     checkpoints_dir = Path(args.checkpoint_dir)

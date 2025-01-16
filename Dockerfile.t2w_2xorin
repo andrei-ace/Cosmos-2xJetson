@@ -11,11 +11,14 @@ COPY README.md /workspace/
 
 # Copy third-party licenses
 COPY ATTRIBUTIONS.md /workspace/
+
+# Copy requirements files
 COPY requirements.txt requirements.txt
 COPY requirements-t2w_2xorin.txt requirements-t2w_2xorin.txt
 
-RUN pip3 install --no-cache-dir -r requirements.txt
 # Install Python dependencies
+RUN pip3 install --no-cache-dir -r requirements.txt
+
 RUN pip3 install --no-cache-dir -r requirements-t2w_2xorin.txt
 
 EXPOSE 9090
