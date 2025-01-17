@@ -414,31 +414,59 @@ Please note that the Video2World prompt upsampler does not consider any user-pro
 python3 -m venv .venv
 source .venv/bin/activate
 pip3 install -r requirements.txt
-PYTHONPATH=$(pwd) python cosmos1/scripts/download_diffusion.py --model_sizes 7B --model_types Text2World
+PYTHONPATH=$(pwd) python3 cosmos1/scripts/download_diffusion.py --model_sizes 7B --model_types Text2World
 # sudo apt install nvidia-cudnn #optional
 pip3 install -r ./requirements-jetson2x.txt
 ```
 
-```bash
-PYTHONPATH=$(pwd) python3 cosmos1/models/diffusion/inference/remote_helper.py
 
-PYTHONPATH=$(pwd) python cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints \
+# Running Text2World on Jetson Orin AGX (JetPack 6.2)
+
+## Download models
+```bash
+pip3 install 'huggingface_hub[cli,torch]' transformers
+pip3 install --upgrade scipy
+huggingface-cli login
+PYTHONPATH=$(pwd) python3 cosmos1/scripts/download_diffusion.py --model_sizes 7B --model_types Text2World
+PYTHONPATH=$(pwd) python3 cosmos1/scripts/download_t5.py
+```
+
+## Build docker image
+```bash
+sudo docker build . -t t2w_2xorin -f Dockerfile.t2w_2xorin
+
+sudo docker run --runtime nvidia -it --rm --network=host --volume ./checkpoints:/workspace/checkpoints --volume ./outputs:/workspace/outputs t2w_2xorin
+```
+
+## Test remote helper works - open two docker containers
+
+```bash
+sudo docker run --runtime nvidia -it --rm --network=host --volume ./checkpoints:/workspace/checkpoints --volume ./outputs:/workspace/outputs t2w_2xorin
+PYTHONPATH=$(pwd) python3 cosmos1/models/diffusion/inference/remote_helper.py
+```
+
+```bash
+sudo docker run --runtime nvidia -it --rm --network=host --volume ./checkpoints:/workspace/checkpoints --volume ./outputs:/workspace/outputs t2w_2xorin
+PYTHONPATH=$(pwd) python3 cosmos1/models/diffusion/inference/test_remote_helper.py
+```
+
+
+## Generate video
+```bash
+PYTHONPATH=$(pwd) python3 cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints \
   --diffusion_transformer_dir Cosmos-1.0-Diffusion-7B-Text2World --prompt "$PROMPT" \
   --video_save_name Cosmos-1.0-Diffusion-7B-Text2World \
   --disable_prompt_upsampler \
   --offload_guardrail_models \
-  --offload_prompt_upsampler \
-  --offload_text_encoder_model
+  --offload_prompt_upsampler
 ```
 
 ```bash
-PYTHONPATH=$(pwd) python cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints \
+PYTHONPATH=$(pwd) python3 cosmos1/models/diffusion/inference/text2world.py --checkpoint_dir checkpoints \
   --diffusion_transformer_dir Cosmos-1.0-Diffusion-7B-Text2World --prompt "$PROMPT" \
   --video_save_name Cosmos-1.0-Diffusion-7B-Text2World_remote \
   --disable_prompt_upsampler \
   --offload_guardrail_models \
   --offload_prompt_upsampler \
-  --offload_text_encoder_model \
-  --offload_tokenizer \
-  --remote_denoiser_uri "PYRO:remote_denoiser@0.0.0.0:9090"
+  --remote_denoiser_uri "PYRO:remote_denoiser@[second-agx-ip]:9090"
 ```

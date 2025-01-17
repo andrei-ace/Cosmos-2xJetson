@@ -16,6 +16,10 @@ COPY ATTRIBUTIONS.md /workspace/
 COPY requirements.txt requirements.txt
 COPY requirements-t2w_2xorin.txt requirements-t2w_2xorin.txt
 
+# Set the correct CUDA architecture for Jetson AGX Orin
+ENV TORCH_CUDA_ARCH_LIST="8.7"
+ENV NVTE_CUDA_ARCHS="87"
+
 # Install Python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
